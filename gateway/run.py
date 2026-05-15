@@ -6486,6 +6486,9 @@ class GatewayRunner:
         if canonical == "resume":
             return await self._handle_resume_command(event)
 
+        if canonical == "sessions":
+            return await self._handle_sessions_command(event)
+
         if canonical == "branch":
             return await self._handle_branch_command(event)
 
@@ -11364,6 +11367,58 @@ class GatewayRunner:
                 return t("gateway.title.current_with_title", session_id=session_id, title=title)
             else:
                 return t("gateway.title.current_no_title", session_id=session_id)
+
+    async def _handle_sessions_command(self, event: MessageEvent) -> str:
+        """Handle /sessions [list|<id_or_title>] — browse or resume previous sessions.
+
+        Without arguments, lists recent titled sessions for this user/platform
+        (same as /resume with no args). With a target, delegates to /resume so
+        /sessions <id_or_title> and /resume <id_or_title> behave identically.
+
+        Gateway equivalent of the CLI's _handle_sessions_command (d6c488f2).
+        """
+        arg = event.get_command_args().strip()
+        sub = arg.lower()
+
+        # Bare /sessions or /sessions list — show recent sessions
+        if not arg or sub in {"list", "ls", "browse"}:
+            if not self._session_db:
+                from hermes_state import format_session_db_unavailable
+                return format_session_db_unavailable(
+                    prefix=t("gateway.shared.session_db_unavailable_prefix")
+                )
+            try:
+                source = event.source
+                user_source = source.platform.value if source.platform else None
+                sessions = self._session_db.list_sessions_rich(
+                    source=user_source, limit=10
+                )
+                if not sessions:
+                    return t("gateway.resume.no_named_sessions")
+                lines = [t("gateway.resume.list_header")]
+                for s in sessions[:10]:
+                    title = s.get("title") or s.get("id", "")
+                    preview = s.get("preview", "")[:40]
+                    preview_part = (
+                        t("gateway.resume.list_preview_suffix", preview=preview)
+                        if preview
+                        else ""
+                    )
+                    lines.append(
+                        t("gateway.resume.list_item", title=title, preview_part=preview_part)
+                    )
+                lines.append(
+                    t("gateway.resume.list_footer")
+                )
+                return "\n".join(lines)
+            except Exception as e:
+                logger.debug("Failed to list sessions: %s", e)
+                return t("gateway.resume.list_failed", error=e)
+
+        # /sessions <id_or_title> — delegate to /resume
+        # Rewrite event text so _handle_resume_command sees the right args
+        event.text = f"/resume {arg}"
+        return await self._handle_resume_command(event)
 
     async def _handle_resume_command(self, event: MessageEvent) -> str:
         """Handle /resume command — switch to a previously-named session."""
