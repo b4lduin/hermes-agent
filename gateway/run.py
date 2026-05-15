@@ -11398,9 +11398,15 @@ class GatewayRunner:
                 return t("gateway.resume.list_failed", error=e)
 
         # Resolve the name to a session ID.
-        target_id = self._session_db.resolve_session_by_title(name)
+        # Try as session ID (exact or prefix match) first, then as title.
+        # Mirrors CLI _resolve_session_by_name_or_id() so /resume <id> works
+        # on gateway platforms (Telegram, Discord, etc.).
+        target_id = self._session_db.resolve_session_id(name)
+        if not target_id:
+            target_id = self._session_db.resolve_session_by_title(name)
         if not target_id:
             return t("gateway.resume.not_found", name=name)
+
         # Compression creates child continuations that hold the live transcript.
         # Follow that chain so gateway /resume matches CLI behavior (#15000).
         try:
@@ -11432,16 +11438,26 @@ class GatewayRunner:
         # Get the title for confirmation
         title = self._session_db.get_session_title(target_id) or name
 
-        # Count messages for context
-        history = self.session_store.load_transcript(target_id)
-        msg_count = len([m for m in history if m.get("role") == "user"]) if history else 0
+        # Count messages from the session DB (more accurate than
+        # load_transcript, which may have stale data if messages
+        # haven't been fully flushed yet).
+        msg_count = 0
+        try:
+            session_row = self._session_db.get_session(target_id)
+            if session_row:
+                msg_count = session_row.get("message_count", 0) or 0
+        except Exception:
+            pass
+        if not msg_count:
+            # Fall back to transcript count if DB column is missing/zero
+            history = self.session_store.load_transcript(target_id)
+            msg_count = len([m for m in history if m.get("role") == "user"]) if history else 0
         if not msg_count:
             return t("gateway.resume.resumed_no_count", title=title)
         if msg_count == 1:
             return t("gateway.resume.resumed_one", title=title, count=msg_count)
         return t("gateway.resume.resumed_many", title=title, count=msg_count)
 
-    async def _handle_branch_command(self, event: MessageEvent) -> str:
         """Handle /branch [name] — fork the current session into a new independent copy.
 
         Copies conversation history to a new session so the user can explore
@@ -11482,7 +11498,13 @@ class GatewayRunner:
 
         parent_session_id = current_entry.session_id
 
-        # Create the new session with parent link
+        # End the parent session as 'branched' so list_sessions_rich()
+        # surfaces the branch child (matches CLI _handle_branch_command).
+        try:
+            self._session_db.end_session(parent_session_id, "branched")
+        except Exception:
+            pass  # best-effort — branch proceeds even if end_session fails
+
         try:
             self._session_db.create_session(
                 session_id=new_session_id,

@@ -237,7 +237,7 @@ gateway:
     list_header:           "📋 **Named Sessions**\n"
     list_item:             "• **{title}**{preview_part}"
     list_preview_suffix:   " — _{preview}_"
-    list_footer:           "\nUsage: `/resume <session name>`"
+    list_footer:           "\nUsage: `/resume <session name or ID>`"
     list_failed:           "Could not list sessions: {error}"
     not_found:             "No session found matching '**{name}**'.\nUse `/resume` with no arguments to see available sessions."
     already_on:            "📌 Already on session **{name}**."

@@ -1060,17 +1060,24 @@ class SessionDB:
         return dict(row) if row else None
 
     def resolve_session_by_title(self, title: str) -> Optional[str]:
-        """Resolve a title to a session ID, preferring the latest in a lineage.
+        """Resolve a title to a session ID.
 
-        If the exact title exists, returns that session's ID.
-        If not, searches for "title #N" variants and returns the latest one.
-        If the exact title exists AND numbered variants exist, returns the
-        latest numbered variant (the most recent continuation).
+        If the exact title exists, returns that session's ID (exact match
+        wins over numbered variants so /resume "My Session" returns the
+        original, not "My Session #3").
+
+        If the exact title doesn't exist, searches for "title #N"
+        variants and returns the latest one (most recent continuation).
+
+        If the user explicitly types "My Session #3", that resolves as
+        an exact match to that specific variant.
         """
-        # First try exact match
+        # First try exact match — exact always wins
         exact = self.get_session_by_title(title)
+        if exact:
+            return exact["id"]
 
-        # Also search for numbered variants: "title #2", "title #3", etc.
+        # No exact match — search for numbered variants: "title #2", etc.
         # Escape SQL LIKE wildcards (%, _) in the title to prevent false matches
         escaped = title.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         with self._lock:
@@ -1084,8 +1091,6 @@ class SessionDB:
         if numbered:
             # Return the most recent numbered variant
             return numbered[0]["id"]
-        elif exact:
-            return exact["id"]
         return None
 
     def get_next_title_in_lineage(self, base_title: str) -> str:
