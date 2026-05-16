@@ -11498,17 +11498,17 @@ class GatewayRunner:
         if not msg_count:
             return t("gateway.resume.resumed_no_count", title=title)
 
-        # Extract last sentence from the most recent substantive assistant message
-        # to give the user context about where they left off.
+        # Extract the last message (user or assistant) to give the user
+        # context about where they left off.
         last_snippet = ""
         try:
             history = self.session_store.load_transcript(target_id)
             if history:
-                # Walk backwards to find the last assistant message with
-                # actual text content (skip tool-call-only messages that
-                # have no direct user-facing text).
+                # Walk backwards to find the last message with actual text
+                # content. Skip tool results and empty messages.
                 for msg in reversed(history):
-                    if msg.get("role") != "assistant":
+                    role = msg.get("role", "")
+                    if role not in ("user", "assistant"):
                         continue
                     content = msg.get("content", "")
                     if isinstance(content, list):
@@ -11520,46 +11520,12 @@ class GatewayRunner:
                         )
                     if not content or not content.strip():
                         continue
-                    # Skip very short tool-calling messages like "Let me search for it"
-                    # that are just preamble to a tool call — the real response comes after.
-                    # Heuristic: if this message also has tool_calls, it's a tool-call
-                    # preamble, not the final substantive answer.
-                    if msg.get("tool_calls"):
-                        continue
-                    # Take the last sentence (up to 120 chars).
-                    # Split on periods but respect quoted content — a period
-                    # inside "..." or '...' does not end a sentence.
-                    import re
-                    # First normalize whitespace
+                    # Truncate to 200 chars, preserving whole words
                     flat = content.replace("\n", " ").strip()
-                    # Walk the string tracking quote depth to find real
-                    # sentence boundaries (not '.' inside quotes).
-                    parts = []
-                    buf_start = 0
-                    in_quote = None  # None, '"', or "'"
-                    i = 0
-                    while i < len(flat):
-                        ch = flat[i]
-                        if ch in ('"', "'") and in_quote is None:
-                            in_quote = ch
-                        elif ch == in_quote:
-                            in_quote = None
-                        elif ch == '.' and in_quote is None:
-                            # Potential sentence boundary
-                            rest = flat[i+1:].lstrip() if i+1 < len(flat) else ""
-                            if not rest or rest[0].isupper() or rest[0] in ('"', "'"):
-                                parts.append(flat[buf_start:i+1].strip())
-                                buf_start = i + 1
-                        i += 1
-                    # Trailing fragment (no final period)
-                    trailing = flat[buf_start:].strip()
-                    if trailing:
-                        parts.append(trailing)
-                    parts = [p for p in parts if p]
-                    if parts:
-                        last_snippet = parts[-1][:120]
-                        if len(parts[-1]) > 120:
-                            last_snippet += "…"
+                    if len(flat) > 200:
+                        flat = flat[:197].rsplit(" ", 1)[0] + "…"
+                    prefix = "👤 " if role == "user" else "🤖 "
+                    last_snippet = prefix + flat
                     break
         except Exception:
             pass  # best-effort — resume proceeds even without snippet
