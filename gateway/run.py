@@ -11526,21 +11526,50 @@ class GatewayRunner:
                     # preamble, not the final substantive answer.
                     if msg.get("tool_calls"):
                         continue
-                    # Take the last sentence (up to 120 chars)
-                    sentences = [s.strip() for s in content.replace("\n", " ").split(".") if s.strip()]
-                    if sentences:
-                        last_snippet = sentences[-1][:120]
-                        if len(sentences[-1]) > 120:
+                    # Take the last sentence (up to 120 chars).
+                    # Split on periods but respect quoted content — a period
+                    # inside "..." or '...' does not end a sentence.
+                    import re
+                    # First normalize whitespace
+                    flat = content.replace("\n", " ").strip()
+                    # Walk the string tracking quote depth to find real
+                    # sentence boundaries (not '.' inside quotes).
+                    parts = []
+                    buf_start = 0
+                    in_quote = None  # None, '"', or "'"
+                    i = 0
+                    while i < len(flat):
+                        ch = flat[i]
+                        if ch in ('"', "'") and in_quote is None:
+                            in_quote = ch
+                        elif ch == in_quote:
+                            in_quote = None
+                        elif ch == '.' and in_quote is None:
+                            # Potential sentence boundary
+                            rest = flat[i+1:].lstrip() if i+1 < len(flat) else ""
+                            if not rest or rest[0].isupper() or rest[0] in ('"', "'"):
+                                parts.append(flat[buf_start:i+1].strip())
+                                buf_start = i + 1
+                        i += 1
+                    # Trailing fragment (no final period)
+                    trailing = flat[buf_start:].strip()
+                    if trailing:
+                        parts.append(trailing)
+                    parts = [p for p in parts if p]
+                    if parts:
+                        last_snippet = parts[-1][:120]
+                        if len(parts[-1]) > 120:
                             last_snippet += "…"
                     break
         except Exception:
             pass  # best-effort — resume proceeds even without snippet
 
-        # Use plain text for the snippet — no Markdown formatting.
-        # Telegram's format_message converts **bold** and _italic_ markers,
-        # and the MarkdownV2 escape step can break nested formatting in
-        # blockquotes. Plain text survives the conversion pipeline intact.
-        snippet_part = f"\n{last_snippet}" if last_snippet else ""
+        # Use a Markdown blockquote for the snippet.
+        # Telegram's format_message handles '> text' at line start
+        # and protects the '>' from escaping while escaping content
+        # inside with _escape_mdv2. This renders as a native
+        # Telegram blockquote (blue line on the left).
+        snippet_part = f"\n> {last_snippet}" if last_snippet else ""
 
         if msg_count == 1:
             return t("gateway.resume.resumed_one", title=title, count=msg_count, snippet_part=snippet_part)
