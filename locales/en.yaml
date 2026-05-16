@@ -242,8 +242,8 @@ gateway:
     not_found:             "No session found matching '**{name}**'.\nUse `/resume` with no arguments to see available sessions."
     already_on:            "📌 Already on session **{name}**."
     switch_failed:         "Failed to switch session."
-    resumed_one: "↻ Resumed session **{title}** ({count} message).{snippet_part} Conversation restored."
-    resumed_many: "↻ Resumed session **{title}** ({count} messages).{snippet_part} Conversation restored."
+    resumed_one: "↻ Resumed session **{title}** ({count} message). Conversation restored.{snippet_part}"
+    resumed_many: "↻ Resumed session **{title}** ({count} messages). Conversation restored.{snippet_part}"
     resumed_no_count: "↻ Resumed session **{title}**. Conversation restored."
 
   sessions:

@@ -11498,32 +11498,49 @@ class GatewayRunner:
         if not msg_count:
             return t("gateway.resume.resumed_no_count", title=title)
 
-        # Extract last sentence from the most recent assistant message
+        # Extract last sentence from the most recent substantive assistant message
         # to give the user context about where they left off.
         last_snippet = ""
         try:
             history = self.session_store.load_transcript(target_id)
             if history:
-                # Walk backwards to find the last assistant message
+                # Walk backwards to find the last assistant message with
+                # actual text content (skip tool-call-only messages that
+                # have no direct user-facing text).
                 for msg in reversed(history):
-                    if msg.get("role") == "assistant":
-                        content = msg.get("content", "")
-                        if isinstance(content, list):
-                            # Multi-part message — concatenate text parts
-                            content = " ".join(
-                                p.get("text", "") for p in content if isinstance(p, dict) and p.get("type") == "text"
-                            )
-                        if content:
-                            # Take the last sentence (up to 120 chars)
-                            sentences = [s.strip() for s in content.replace("\n", " ").split(".") if s.strip()]
-                            if sentences:
-                                last_snippet = sentences[-1][:120]
-                                if len(sentences[-1]) > 120:
-                                    last_snippet += "…"
+                    if msg.get("role") != "assistant":
+                        continue
+                    content = msg.get("content", "")
+                    if isinstance(content, list):
+                        # Multi-part message — concatenate text parts only
+                        content = " ".join(
+                            p.get("text", "")
+                            for p in content
+                            if isinstance(p, dict) and p.get("type") == "text"
+                        )
+                    if not content or not content.strip():
+                        continue
+                    # Skip very short tool-calling messages like "Let me search for it"
+                    # that are just preamble to a tool call — the real response comes after.
+                    # Heuristic: if this message also has tool_calls, it's a tool-call
+                    # preamble, not the final substantive answer.
+                    if msg.get("tool_calls"):
+                        continue
+                    # Take the last sentence (up to 120 chars)
+                    sentences = [s.strip() for s in content.replace("\n", " ").split(".") if s.strip()]
+                    if sentences:
+                        last_snippet = sentences[-1][:120]
+                        if len(sentences[-1]) > 120:
+                            last_snippet += "…"
+                    break
         except Exception:
             pass  # best-effort — resume proceeds even without snippet
 
-        snippet_part = f"\n> _{last_snippet}_" if last_snippet else ""
+        # Use plain text for the snippet — no Markdown formatting.
+        # Telegram's format_message converts **bold** and _italic_ markers,
+        # and the MarkdownV2 escape step can break nested formatting in
+        # blockquotes. Plain text survives the conversion pipeline intact.
+        snippet_part = f"\n{last_snippet}" if last_snippet else ""
 
         if msg_count == 1:
             return t("gateway.resume.resumed_one", title=title, count=msg_count, snippet_part=snippet_part)
