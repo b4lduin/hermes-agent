@@ -11541,6 +11541,7 @@ class GatewayRunner:
             return t("gateway.resume.resumed_one", title=title, count=msg_count, snippet_part=snippet_part)
         return t("gateway.resume.resumed_many", title=title, count=msg_count, snippet_part=snippet_part)
 
+    async def _handle_branch_command(self, event: MessageEvent) -> str:
         """Handle /branch [name] — fork the current session into a new independent copy.
 
         Copies conversation history to a new session so the user can explore
