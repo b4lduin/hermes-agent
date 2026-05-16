@@ -11388,25 +11388,15 @@ class GatewayRunner:
                     prefix=t("gateway.shared.session_db_unavailable_prefix")
                 )
             try:
-                source = event.source
-                user_source = source.platform.value if source.platform else None
-                sessions = self._session_db.list_sessions_rich(
-                    source=user_source, limit=10
-                )
+                # Show all sessions regardless of source — the TUI does the same.
+                # Filtering by source='telegram' hides sessions from CLI/TUI.
+                sessions = self._session_db.list_sessions_rich(limit=10)
                 if not sessions:
                     return t("gateway.resume.no_named_sessions")
                 lines = [t("gateway.resume.list_header")]
                 for s in sessions[:10]:
                     title = s.get("title") or s.get("id", "")
-                    preview = s.get("preview", "")[:40]
-                    preview_part = (
-                        t("gateway.resume.list_preview_suffix", preview=preview)
-                        if preview
-                        else ""
-                    )
-                    lines.append(
-                        t("gateway.resume.list_item", title=title, preview_part=preview_part)
-                    )
+                    lines.append(t("gateway.sessions.list_item_title", title=title))
                 lines.append(
                     t("gateway.resume.list_footer")
                 )
@@ -11433,10 +11423,8 @@ class GatewayRunner:
         if not name:
             # List recent titled sessions for this user/platform
             try:
-                user_source = source.platform.value if source.platform else None
-                sessions = self._session_db.list_sessions_rich(
-                    source=user_source, limit=10
-                )
+                # Show all sessions regardless of source - matches /sessions and TUI.
+                sessions = self._session_db.list_sessions_rich(limit=10)
                 titled = [s for s in sessions if s.get("title")]
                 if not titled:
                     return t("gateway.resume.no_named_sessions")
@@ -11509,9 +11497,37 @@ class GatewayRunner:
             msg_count = len([m for m in history if m.get("role") == "user"]) if history else 0
         if not msg_count:
             return t("gateway.resume.resumed_no_count", title=title)
+
+        # Extract last sentence from the most recent assistant message
+        # to give the user context about where they left off.
+        last_snippet = ""
+        try:
+            history = self.session_store.load_transcript(target_id)
+            if history:
+                # Walk backwards to find the last assistant message
+                for msg in reversed(history):
+                    if msg.get("role") == "assistant":
+                        content = msg.get("content", "")
+                        if isinstance(content, list):
+                            # Multi-part message — concatenate text parts
+                            content = " ".join(
+                                p.get("text", "") for p in content if isinstance(p, dict) and p.get("type") == "text"
+                            )
+                        if content:
+                            # Take the last sentence (up to 120 chars)
+                            sentences = [s.strip() for s in content.replace("\n", " ").split(".") if s.strip()]
+                            if sentences:
+                                last_snippet = sentences[-1][:120]
+                                if len(sentences[-1]) > 120:
+                                    last_snippet += "…"
+        except Exception:
+            pass  # best-effort — resume proceeds even without snippet
+
+        snippet_part = f"\n> _{last_snippet}_" if last_snippet else ""
+
         if msg_count == 1:
-            return t("gateway.resume.resumed_one", title=title, count=msg_count)
-        return t("gateway.resume.resumed_many", title=title, count=msg_count)
+            return t("gateway.resume.resumed_one", title=title, count=msg_count, snippet_part=snippet_part)
+        return t("gateway.resume.resumed_many", title=title, count=msg_count, snippet_part=snippet_part)
 
         """Handle /branch [name] — fork the current session into a new independent copy.
 
